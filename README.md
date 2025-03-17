@@ -1,12 +1,17 @@
 # 🚢 Container Management System
 
-This project provides a **PL/SQL-based solution** for handling **import detention charges** in a logistics management system. It automates detention calculations, currency conversion, overdue notifications, and audit logging.
+**##Overview**
+This project is a database system for managing logistics operations, including customer details, container tracking, terminal operations, currency management, and error logging. It also includes a PL/SQL package for calculating detention charges and converting currency, as well as a notification system for overdue containers.
 
 ---
 
 ## 📜 Features
-✅ **Detention Charge Calculation** - Calculates charges based on free time & customs status.  
-✅ **Currency Conversion** - Converts detention charges into the customer’s currency.  
-✅ **Overdue Notifications** - Sends email & SMS alerts for overdue containers.  
-✅ **Audit Logging** - Tracks changes in the `Container` table.  
-✅ **Bulk Processing** - Uses **bulk collect** and **FORALL** for efficiency. 
+## Features
+- **Database Schema**: Normalized tables for managing logistics operations.
+- **PL/SQL Package**: Functions and procedures for calculating detention charges and converting currency.
+- **Notification System**: Automates email and SMS notifications for overdue containers.
+- **Extend Free Time**: Extends free time based on appointment status.
+- **Audit Trigger**: Logs all changes (inserts, updates, deletes) to the table.
+- **Advanced Error Handling**: Custom exceptions and detailed error logging.
+- **Cursors and Bulk Collection**: Use of cursors and bulk collection for efficient data retrieval and processing.
+
