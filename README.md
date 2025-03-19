@@ -8,7 +8,7 @@ This project is a database system for managing logistics operations, including c
 ## 📜 Features
 - **Database Schema**: Normalized tables for managing logistics operations.
 - **PL/SQL Package**: Functions and procedures for calculating detention charges and converting currency.
-- **Notification System**: Automates email and SMS notifications for overdue containers.
+- **Notification System**: Automates email notifications for overdue containers.
 - **Extend Free Time**: Extends free time based on appointment status.
 - **Audit Trigger**: Logs all changes (inserts, updates, deletes) to the table.
 - **Advanced Error Handling**: Custom exceptions and detailed error logging.
