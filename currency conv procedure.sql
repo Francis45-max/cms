@@ -53,3 +53,41 @@ CREATE OR REPLACE PROCEDURE Convert_To_Customer_Currency_Proc(
         -- Calculate detention charges in the billed currency
         p_converted_charges := v_detention_days * v_conversion_rate;
     END Convert_To_Customer_Currency_Proc;
+
+
+----Test case
+
+DECLARE
+    v_converted_charges NUMBER;
+BEGIN
+    Convert_To_Customer_Currency_Proc(
+        p_container_number => 'CONT123',  -- Replace with an actual container number
+        p_customer_id => 'CUST456',      -- Replace with an actual customer ID
+        p_converted_charges => v_converted_charges
+    );
+
+    -- Display the converted detention charges
+    DBMS_OUTPUT.PUT_LINE('Converted Detention Charges: ' || v_converted_charges);
+END;
+/
+---Inserting Sample data
+
+-- Insert into ServiceContract table
+INSERT INTO ServiceContract (service_contract_id, free_time)
+VALUES (101, 5); -- Assuming 5 days free time
+
+-- Insert into Container table
+INSERT INTO Container (container_number, service_contract_id, gate_out_date, gate_in_date, customs_status, location_id, customer_id)
+VALUES ('CONT123', 101, SYSDATE - 15, SYSDATE, 'No', 1, 'CUST456'); -- 15 days ago gate out, returned today
+
+-- Insert into Customer table
+INSERT INTO Customer (cust_id, customer_name, region_id)
+VALUES ('CUST456', 'Test Customer', 1);
+
+-- Insert into Currency table
+INSERT INTO Currency (region_id, activity_currency, billed_currency, conversion_rate)
+VALUES (1, 'USD', 'EUR', 0.85); -- USD to EUR conversion rate
+
+
+----
+Final Result: 8.5 EUR (Converted Detention Charges) 
