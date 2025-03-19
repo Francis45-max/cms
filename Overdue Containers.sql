@@ -58,7 +58,7 @@ BEGIN
             -- Send email (assuming UTL_MAIL is configured)
             BEGIN
                 UTL_MAIL.SEND(
-                    sender => 'noreply@logistics.com',
+                    sender => 'esther@tjx.com',
                     recipients => v_email,
                     subject => 'Overdue Container Notification',
                     message => v_message
@@ -73,26 +73,6 @@ BEGIN
                     DBMS_OUTPUT.PUT_LINE('Error: ' || v_error_message);
                     CONTINUE; -- Skip to the next container
             END;
-
-            -- Send SMS (assuming an SMS gateway API is NUMBERegrated)
-            BEGIN
-                -- Replace with your SMS API endpoNUMBER and parameters
-                UTL_HTTP.REQUEST(
-                    url => 'https://sms-api.example.com/send',
-                    method => 'POST',
-                    body => 'phone=' || v_phone || '&message=' || v_message
-                );
-                DBMS_OUTPUT.PUT_LINE('SMS sent to ' || v_phone || ' for container ' || container.container_number);
-            EXCEPTION
-                WHEN OTHERS THEN
-                    v_error_message := 'Failed to send SMS to ' || v_phone || ': ' || SQLERRM;
-                    -- Log the error and continue processing the next container
-                    INSERT NUMBERO ErrorLog (error_id, error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id)
-                    VALUES (error_log_seq.NEXTVAL, SYSTIMESTAMP, v_error_message, 'Container', container.container_number, 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
-                    DBMS_OUTPUT.PUT_LINE('Error: ' || v_error_message);
-                    CONTINUE; -- Skip to the next container
-            END;
-        EXCEPTION
             WHEN OTHERS THEN
                 -- Log any unexpected errors and continue processing the next container
                 v_error_message := 'Unexpected error for container ' || container.container_number || ': ' || SQLERRM;
@@ -104,3 +84,29 @@ BEGIN
     END LOOP;
 END Send_Overdue_Notifications;
 /
+
+
+
+------Check Overdue Containers Processed
+SELECT container_number, gate_out_date, gate_in_date, customs_status
+FROM Container
+WHERE gate_in_date > (gate_out_date + (SELECT free_time FROM ServiceContract WHERE service_contract_id = Container.service_contract_id))
+  AND customs_status = 'No';
+
+----Check Error Log Entries
+
+SELECT * FROM ErrorLog WHERE affected_table = 'Container' ORDER BY error_timestamp DESC;
+
+
+## Test Cases for `Send_Overdue_Notifications` Procedure
+
+| Test Case ID | Container Number | Gate Out Date | Gate In Date | Free Time | Customs Status | Expected Outcome |
+|-------------|--------------------|--------------|--------------|-----------|----------------|------------------|
+| **TC1**     | `CONT123`          | `01-MAR-2025`| `15-MAR-2025`| `10`      | `No`           | Notification Sent (Overdue by 4 days) |
+| **TC2**     | `CONT124`          | `01-MAR-2025` | `12-MAR-2025`| `10`     | `No`           | No Notification (Within free time) |
+| **TC3**     | `CONT125`          | `01-MAR-2025` | `20-MAR-2025` | `10`    | `No`            | Notification Sent (Overdue by 9 days) |
+| **TC4**     | `CONT126`          | `01-MAR-2025` | `15-MAR-2025` | `10`    | `Yes`          | No Notification (Customs cleared) |
+| **TC5**     | `CONT127`          | `01-MAR-2025` | `05-MAR-2025` | `10`    | `No`           | No Notification (Gate in before free time ends) |
+| **TC6**     | `INVALID`          | `01-MAR-2025` | `15-MAR-2025` | `10`    | `No`           | Error Logged - Container not found |
+| **TC7**     | `CONT128`          | `01-MAR-2025` | `15-MAR-2025` | `10`    | `No`           | Error Logged - Customer email not found |
+| **TC8**     | `CONT129`          | `01-MAR-2025` | `15-MAR-2025` | `10`    | `No`           | Email sending failed, error logged |
