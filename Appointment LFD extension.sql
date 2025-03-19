@@ -71,3 +71,64 @@ EXCEPTION
         COMMIT;
 END Extend_Free_Time_Based_On_Appointment;
 /
+
+
+-- Test Case for Extend_Free_Time_Based_On_Appointment Procedure
+
+-- Step 1: Setup test data
+
+-- Insert test data into ServiceContract
+INSERT INTO ServiceContract (service_contract_id, free_time, new_lfd) 
+VALUES (1, 10, NULL);
+
+INSERT INTO ServiceContract (service_contract_id, free_time, new_lfd) 
+VALUES (2, 5, NULL);
+
+-- Insert test data into Container
+INSERT INTO Container (container_id, service_contract_id, location_id) 
+VALUES (100, 1, 10);
+
+INSERT INTO Container (container_id, service_contract_id, location_id) 
+VALUES (101, 2, 20);
+
+-- Insert test data into Terminal with appointment statuses
+INSERT INTO Terminal (location_id, appointment_status) 
+VALUES (10, 'unavailable for 3 days');
+
+INSERT INTO Terminal (location_id, appointment_status) 
+VALUES (20, 'unavailable for 5 days');
+
+COMMIT;
+
+-- Step 2: Execute the procedure
+BEGIN
+    Extend_Free_Time_Based_On_Appointment;
+END;
+/
+
+-- Step 3: Validate the results
+
+-- Check if new_lfd is updated correctly
+SELECT service_contract_id, free_time, new_lfd 
+FROM ServiceContract
+WHERE service_contract_id IN (1, 2);
+
+-- Expected Output:
+-- service_contract_id | free_time | new_lfd
+-- --------------------|----------|--------
+-- 1                  | 10       | 13  (10 + 3 days)
+-- 2                  | 5        | 10  (5 + 5 days)
+
+-- Check if audit logs are created
+SELECT * FROM ContainerAuditLog 
+WHERE affected_table = 'ServiceContract';
+
+-- Expected Output: 
+-- Audit logs should be present showing changes in `new_lfd`
+
+-- Step 4: Cleanup test data after validation
+DELETE FROM ContainerAuditLog WHERE affected_table = 'ServiceContract';
+DELETE FROM Terminal WHERE location_id IN (10, 20);
+DELETE FROM Container WHERE container_id IN (100, 101);
+DELETE FROM ServiceContract WHERE service_contract_id IN (1, 2);
+COMMIT;
