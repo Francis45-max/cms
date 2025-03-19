@@ -66,3 +66,54 @@ CREATE OR REPLACE FUNCTION Calculate_Detention_Charges(
 
         RETURN v_detention_days;
     END Calculate_Detention_Charges;
+
+
+
+SET SERVEROUTPUT ON;
+DECLARE
+    v_detention_days NUMBER;
+BEGIN
+    -- Test Case 1: No detention
+    v_detention_days := Calculate_Detention_Charges('CONT123', DATE '2025-03-01', DATE '2025-03-10');
+    DBMS_OUTPUT.PUT_LINE('Test Case 1 - Expected: 0, Got: ' || v_detention_days);
+
+    -- Test Case 2: Detention applies
+    v_detention_days := Calculate_Detention_Charges('CONT124', DATE '2025-03-01', DATE '2025-03-15');
+    DBMS_OUTPUT.PUT_LINE('Test Case 2 - Expected: 5, Got: ' || v_detention_days);
+
+    -- Test Case 3: Customs clearance adds extra days
+    v_detention_days := Calculate_Detention_Charges('CONT125', DATE '2025-03-01', DATE '2025-03-15');
+    DBMS_OUTPUT.PUT_LINE('Test Case 3 - Expected: 0, Got: ' || v_detention_days);
+
+    -- Test Case 4: Customs clearance applied but still detained
+    v_detention_days := Calculate_Detention_Charges('CONT126', DATE '2025-03-01', DATE '2025-03-20');
+    DBMS_OUTPUT.PUT_LINE('Test Case 4 - Expected: 3, Got: ' || v_detention_days);
+
+    -- Test Case 5: Port closure extends free time
+    v_detention_days := Calculate_Detention_Charges('CONT127', DATE '2025-03-01', DATE '2025-03-15');
+    DBMS_OUTPUT.PUT_LINE('Test Case 5 - Expected: 0, Got: ' || v_detention_days);
+
+    -- Test Case 6: Invalid container (should raise an error)
+    BEGIN
+        v_detention_days := Calculate_Detention_Charges('INVALID', DATE '2025-03-01', DATE '2025-03-15');
+        DBMS_OUTPUT.PUT_LINE('Test Case 6 - Expected: Error, Got: ' || v_detention_days);
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Test Case 6 - Expected Error -20001, Got: ' || SQLERRM);
+    END;
+
+END;
+/
+
+---Test Case Table
+
+Test Case Table
+Test Case ID	Container Number  Gate Out Date	Gate In Date	Expected Detention	Description
+TC1	         CONT123	   01-MAR-2025	10-MAR-2025	0	              Gate in within the free time, no detention.
+TC2	         CONT124	   01-MAR-2025	15-MAR-2025	5	              Free time expired, detention applies.
+TC3	         CONT125	   01-MAR-2025	15-MAR-2025	0	             Customs clearance adds 4 days, avoiding detention.
+TC4	         CONT126	   01-MAR-2025	20-MAR-2025	3	              Customs clearance applied, but still detained after extra days.
+TC5	         CONT127	   01-MAR-2025	15-MAR-2025	0	              Port closure days extend the free time, avoiding detention.
+TC6	         INVALID	   01-MAR-2025	15-MAR-2025	Error -20001	           Container not found in the database.
+
+
