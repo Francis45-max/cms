@@ -1,7 +1,7 @@
 CREATE OR REPLACE PROCEDURE Send_Overdue_Notifications IS
     -- Cursor to fetch overdue containers
     CURSOR overdue_containers IS
-        SELECT c.container_number, c.customer_id, cu.customer_name, cu.region,
+        SELECT c.container_number, c.customer_id, cu.customer_name, cu.region_id,
                c.gate_out_date, c.gate_in_date, c.customs_status,
                (c.gate_in_date - (c.gate_out_date + sc.free_time)) AS overdue_days,
                cu.email, cu.phone
@@ -17,24 +17,30 @@ CREATE OR REPLACE PROCEDURE Send_Overdue_Notifications IS
     v_email VARCHAR2(100);
     v_phone VARCHAR2(20);
     v_processed NUMBER := 0;
+    v_container_number VARCHAR2(50);
+    v_customer_name VARCHAR2(255);
+    v_overdue_days NUMBER;
 
 BEGIN
     -- Process overdue containers
-    FOR container IN overdue_containers LOOP
+    FOR container_rec IN overdue_containers LOOP
         BEGIN
             v_processed := v_processed + 1; -- Count processed containers
             
+            -- Assign values from cursor to local variables
+            v_container_number := container_rec.container_number;
+            v_customer_name := container_rec.customer_name;
+            v_overdue_days := container_rec.overdue_days;
+            v_email := container_rec.email;
+            v_phone := container_rec.phone;
+
             -- Construct the notification message
-            v_message := 'Dear ' || container.customer_name || ',' || CHR(10) ||
-                         'Your container ' || container.container_number || ' is overdue by ' ||
-                         container.overdue_days || ' days.' || CHR(10) ||
+            v_message := 'Dear ' || v_customer_name || ',' || CHR(10) ||
+                         'Your container ' || v_container_number || ' is overdue by ' ||
+                         v_overdue_days || ' days.' || CHR(10) ||
                          'Please take necessary action to avoid additional charges.' || CHR(10) ||
                          'Thank you,' || CHR(10) ||
                          'Logistics Management Team';
-
-            -- Assign email & phone from cursor
-            v_email := container.email;
-            v_phone := container.phone;
 
             -- Send email (assuming UTL_MAIL is configured)
             BEGIN
@@ -44,20 +50,20 @@ BEGIN
                     subject => 'Overdue Container Notification',
                     message => v_message
                 );
-                DBMS_OUTPUT.PUT_LINE('Email sent to ' || v_email || ' for container ' || container.container_number);
+                DBMS_OUTPUT.PUT_LINE('Email sent to ' || v_email || ' for container ' || v_container_number);
             EXCEPTION
                 WHEN OTHERS THEN
                     v_error_message := 'Failed to send email to ' || v_email || ': ' || SQLERRM;
-                    INSERT INTO ErrorLog (error_id, error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id)
-                    VALUES (error_log_seq.NEXTVAL, SYSTIMESTAMP, v_error_message, 'Container', container.container_number, 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
+                    INSERT INTO ErrorLog (error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id)
+                    VALUES (SYSTIMESTAMP, v_error_message, 'Container', v_container_number, 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
                     DBMS_OUTPUT.PUT_LINE('Error: ' || v_error_message);
             END;
 
         EXCEPTION
             WHEN OTHERS THEN
-                v_error_message := 'Unexpected error for container ' || container.container_number || ': ' || SQLERRM;
-                INSERT INTO ErrorLog (error_id, error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id)
-                VALUES (error_log_seq.NEXTVAL, SYSTIMESTAMP, v_error_message, 'Container', container.container_number, 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
+                v_error_message := 'Unexpected error for container ' || v_container_number || ': ' || SQLERRM;
+                INSERT INTO ErrorLog (error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id)
+                VALUES (SYSTIMESTAMP, v_error_message, 'Container', v_container_number, 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
                 DBMS_OUTPUT.PUT_LINE('Error: ' || v_error_message);
         END;
     END LOOP;
@@ -70,6 +76,7 @@ BEGIN
     END IF;
 END Send_Overdue_Notifications;
 /
+
 
 
 
