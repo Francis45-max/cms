@@ -1,4 +1,3 @@
-
 CREATE OR REPLACE PACKAGE DETENTION_PKG IS
     -- Function to calculate detention charges for a single container
     FUNCTION Calculate_Detention_Charges(
@@ -28,12 +27,12 @@ CREATE OR REPLACE PACKAGE BODY DETENTION_PKG IS
         v_detention_days NUMBER := 0;
         v_customs_status VARCHAR2(3);
         v_location_id NUMBER;
-        v_port_closure_dates DATE;
+        v_port_closure_count NUMBER;
     BEGIN
         -- Get free time, customs status, and location_id for the container
         BEGIN
             SELECT sc.free_time, c.customs_status, c.location_id
-            NUMBERO v_free_time, v_customs_status, v_location_id
+            INTO v_free_time, v_customs_status, v_location_id
             FROM Container c
             JOIN ServiceContract sc ON c.service_contract_id = sc.service_contract_id
             WHERE c.container_number = p_container_number;
@@ -52,25 +51,19 @@ CREATE OR REPLACE PACKAGE BODY DETENTION_PKG IS
                 v_last_free_day := v_last_free_day + 1;
 
                 -- Skip weekends (Saturday and Sunday)
-                WHILE TO_CHAR(v_last_free_day, 'DY') IN ('SAT', 'SUN') LOOP
+                WHILE TO_CHAR(v_last_free_day, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') IN ('SAT', 'SUN') LOOP
                     v_last_free_day := v_last_free_day + 1;
                 END LOOP;
 
-                -- Skip port closure dates (from Terminal table)
+                -- Skip port closure dates
                 LOOP
-                    BEGIN
-                        -- Check if the current v_last_free_day is a port closure date
-                        SELECT port_closure_dates NUMBERO v_port_closure_dates
-                        FROM Terminal
-                        WHERE location_id = v_location_id
-                          AND port_closure_dates = v_last_free_day;
+                    SELECT COUNT(*) INTO v_port_closure_count
+                    FROM Terminal
+                    WHERE location_id = v_location_id
+                      AND port_closure_dates = v_last_free_day;
 
-                        -- If port closure date is found, skip it by incrementing v_last_free_day
-                        v_last_free_day := v_last_free_day + 1;
-                    EXCEPTION
-                        WHEN NO_DATA_FOUND THEN
-                            EXIT; -- No port closure, exit the loop
-                    END;
+                    EXIT WHEN v_port_closure_count = 0; -- No closure, exit loop
+                    v_last_free_day := v_last_free_day + 1; -- If closed, move to next day
                 END LOOP;
             END LOOP;
         END IF;
@@ -80,7 +73,7 @@ CREATE OR REPLACE PACKAGE BODY DETENTION_PKG IS
             v_detention_days := p_gate_in_date - v_last_free_day;
         END IF;
 
-        RETURN v_detention_days;
+        RETURN NVL(v_detention_days, 0); -- Ensure a value is always returned
     END Calculate_Detention_Charges;
 
     -- Procedure to convert detention charges to customer's region currency
@@ -92,15 +85,15 @@ CREATE OR REPLACE PACKAGE BODY DETENTION_PKG IS
         v_detention_days NUMBER;
         v_activity_currency VARCHAR2(50);
         v_billed_currency VARCHAR2(50);
-        v_conversion_rate DECIMAL(10, 2);
+        v_conversion_rate NUMBER(10,2);
         v_region_id NUMBER;
-        v_gate_out_date DATE; -- Declare v_gate_out_date
-        v_gate_in_date DATE;  -- Declare v_gate_in_date
+        v_gate_out_date DATE;
+        v_gate_in_date DATE;
     BEGIN
         -- Fetch gate_out_date and gate_in_date for the container
         BEGIN
             SELECT c.gate_out_date, c.gate_in_date
-            NUMBERO v_gate_out_date, v_gate_in_date
+            INTO v_gate_out_date, v_gate_in_date
             FROM Container c
             WHERE c.container_number = p_container_number;
         EXCEPTION
@@ -113,7 +106,7 @@ CREATE OR REPLACE PACKAGE BODY DETENTION_PKG IS
 
         -- Fetch region_id for the customer
         BEGIN
-            SELECT region_id NUMBERO v_region_id
+            SELECT region_id INTO v_region_id
             FROM Customer
             WHERE cust_id = p_customer_id;
         EXCEPTION
@@ -124,7 +117,7 @@ CREATE OR REPLACE PACKAGE BODY DETENTION_PKG IS
         -- Fetch currency details for the customer's region
         BEGIN
             SELECT activity_currency, billed_currency, conversion_rate
-            NUMBERO v_activity_currency, v_billed_currency, v_conversion_rate
+            INTO v_activity_currency, v_billed_currency, v_conversion_rate
             FROM Currency
             WHERE region_id = v_region_id;
         EXCEPTION
