@@ -1,6 +1,3 @@
-
----Procedure to Calculate Bulk Detention Charges
-
 CREATE OR REPLACE PROCEDURE Calculate_Bulk_Detention_Charges IS
     -- Define a record type to hold container details
     TYPE ContainerRecord IS RECORD (
@@ -21,11 +18,15 @@ CREATE OR REPLACE PROCEDURE Calculate_Bulk_Detention_Charges IS
     -- Variables for detention calculation
     v_last_free_day DATE;
     v_detention_days NUMBER;
-    v_port_closure_dates DATE;
+    
+    -- Collection for port closure dates
+    TYPE DateTable IS TABLE OF DATE;
+    v_port_closure_dates DateTable;
+
 BEGIN
-    -- Fetch all container details NUMBERo the bulk collection
+    -- Fetch all container details into the bulk collection
     SELECT c.container_number, c.gate_out_date, c.gate_in_date, c.customs_status, c.location_id, sc.free_time
-    BULK COLLECT NUMBERO v_containers
+    BULK COLLECT INTO v_containers
     FROM Container c
     JOIN ServiceContract sc ON c.service_contract_id = sc.service_contract_id
     WHERE c.gate_out_date IS NOT NULL AND c.gate_in_date IS NOT NULL;
@@ -36,34 +37,31 @@ BEGIN
         v_last_free_day := v_containers(i).gate_out_date + v_containers(i).free_time;
         v_detention_days := 0;
 
+        -- Fetch port closure dates for this location in bulk
+        SELECT port_closure_dates BULK COLLECT INTO v_port_closure_dates
+        FROM Terminal
+        WHERE location_id = v_containers(i).location_id;
+
         -- Check if container went through customs
         IF v_containers(i).customs_status = 'Yes' THEN
-            -- Add 4 additional free days, excluding weekends and port closure dates
-            FOR j IN 1..4 LOOP
-                v_last_free_day := v_last_free_day + 1;
-
-                -- Skip weekends (Saturday and Sunday)
-                WHILE TO_CHAR(v_last_free_day, 'DY') IN ('SAT', 'SUN') LOOP
+            -- Add 4 additional free days, skipping weekends and port closure dates
+            DECLARE
+                v_extra_days NUMBER := 0;
+            BEGIN
+                WHILE v_extra_days < 4 LOOP
                     v_last_free_day := v_last_free_day + 1;
-                END LOOP;
 
-                -- Skip port closure dates (from Terminal table)
-                LOOP
-                    BEGIN
-                        -- Check if the current v_last_free_day is a port closure date
-                        SELECT port_closure_dates NUMBERO v_port_closure_dates
-                        FROM Terminal
-                        WHERE location_id = v_containers(i).location_id -- Use location_id instead of activity_location
-                          AND port_closure_dates = v_last_free_day;
-
-                        -- If port closure date is found, skip it by incrementing v_last_free_day
+                    -- Skip weekends
+                    WHILE TO_CHAR(v_last_free_day, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') IN ('SAT', 'SUN') LOOP
                         v_last_free_day := v_last_free_day + 1;
-                    EXCEPTION
-                        WHEN NO_DATA_FOUND THEN
-                            EXIT; -- No port closure, exit the loop
-                    END;
+                    END LOOP;
+
+                    -- Skip port closure dates
+                    IF v_last_free_day NOT MEMBER OF v_port_closure_dates THEN
+                        v_extra_days := v_extra_days + 1;
+                    END IF;
                 END LOOP;
-            END LOOP;
+            END;
         END IF;
 
         -- Calculate detention days
