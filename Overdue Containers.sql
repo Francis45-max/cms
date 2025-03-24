@@ -3,38 +3,27 @@ CREATE OR REPLACE PROCEDURE Send_Overdue_Notifications IS
     CURSOR overdue_containers IS
         SELECT c.container_number, c.customer_id, cu.customer_name, cu.region,
                c.gate_out_date, c.gate_in_date, c.customs_status,
-               (c.gate_in_date - (c.gate_out_date + sc.free_time)) AS overdue_days
+               (c.gate_in_date - (c.gate_out_date + sc.free_time)) AS overdue_days,
+               cu.email, cu.phone
         FROM Container c
         JOIN Customer cu ON c.customer_id = cu.cust_id
         JOIN ServiceContract sc ON c.service_contract_id = sc.service_contract_id
         WHERE c.gate_in_date > (c.gate_out_date + sc.free_time)
-          AND c.customs_status = 'No'; -- Containers with customs clearance delays
+          AND c.customs_status = 'No'; -- Only for non-customs cleared containers
 
     -- Variables
     v_message VARCHAR2(1000);
+    v_error_message VARCHAR2(1000);
     v_email VARCHAR2(100);
     v_phone VARCHAR2(20);
-    v_error_message VARCHAR2(1000);
-    v_container_count NUMBER := 0; -- Counter to check if any containers are found
+    v_processed NUMBER := 0;
+
 BEGIN
-    -- Check if any containers are overdue
-    SELECT COUNT(*)
-    INTO v_container_count
-    FROM Container c
-    JOIN Customer cu ON c.customer_id = cu.cust_id
-    JOIN ServiceContract sc ON c.service_contract_id = sc.service_contract_id
-    WHERE c.gate_in_date > (c.gate_out_date + sc.free_time)
-      AND c.customs_status = 'No';
-
-    -- If no containers are found, log a message and exit
-    IF v_container_count = 0 THEN
-        DBMS_OUTPUT.PUT_LINE('No overdue containers found. Procedure execution stopped.');
-        RETURN; -- Exit the procedure
-    END IF;
-
     -- Process overdue containers
     FOR container IN overdue_containers LOOP
         BEGIN
+            v_processed := v_processed + 1; -- Count processed containers
+            
             -- Construct the notification message
             v_message := 'Dear ' || container.customer_name || ',' || CHR(10) ||
                          'Your container ' || container.container_number || ' is overdue by ' ||
@@ -43,21 +32,9 @@ BEGIN
                          'Thank you,' || CHR(10) ||
                          'Logistics Management Team';
 
-            -- Fetch customer email and phone
-            BEGIN
-                SELECT email, phone
-                INTO v_email, v_phone
-                FROM Customer
-                WHERE cust_id = container.customer_id;
-            EXCEPTION
-                WHEN NO_DATA_FOUND THEN
-                    v_error_message := 'Customer details not found for container ' || container.container_number;
-                    -- Log the error and continue processing the next container
-                    INSERT INTO ErrorLog (error_id, error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id)
-                    VALUES (error_log_seq.NEXTVAL, SYSTIMESTAMP, v_error_message, 'Customer', container.customer_id, 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
-                    DBMS_OUTPUT.PUT_LINE('Error: ' || v_error_message);
-                    CONTINUE; -- Skip to the next container
-            END;
+            -- Assign email & phone from cursor
+            v_email := container.email;
+            v_phone := container.phone;
 
             -- Send email (assuming UTL_MAIL is configured)
             BEGIN
@@ -71,25 +48,26 @@ BEGIN
             EXCEPTION
                 WHEN OTHERS THEN
                     v_error_message := 'Failed to send email to ' || v_email || ': ' || SQLERRM;
-                    -- Log the error and continue processing the next container
                     INSERT INTO ErrorLog (error_id, error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id)
                     VALUES (error_log_seq.NEXTVAL, SYSTIMESTAMP, v_error_message, 'Container', container.container_number, 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
                     DBMS_OUTPUT.PUT_LINE('Error: ' || v_error_message);
-                    CONTINUE; -- Skip to the next container
             END;
 
         EXCEPTION
             WHEN OTHERS THEN
-                -- Log any unexpected errors and continue processing the next container
                 v_error_message := 'Unexpected error for container ' || container.container_number || ': ' || SQLERRM;
                 INSERT INTO ErrorLog (error_id, error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id)
                 VALUES (error_log_seq.NEXTVAL, SYSTIMESTAMP, v_error_message, 'Container', container.container_number, 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
                 DBMS_OUTPUT.PUT_LINE('Error: ' || v_error_message);
-                CONTINUE; -- Skip to the next container
         END;
     END LOOP;
 
-    DBMS_OUTPUT.PUT_LINE('Procedure completed successfully.');
+    -- If no containers were processed
+    IF v_processed = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('No overdue containers found.');
+    ELSE
+        DBMS_OUTPUT.PUT_LINE('Procedure completed successfully. Processed ' || v_processed || ' containers.');
+    END IF;
 END Send_Overdue_Notifications;
 /
 
