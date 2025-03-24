@@ -47,6 +47,7 @@ CREATE TABLE ServiceContract (
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     free_time NUMBER NOT NULL,
+    new_lfd NUMBER,
     status VARCHAR2(20) CHECK (status IN ('Active', 'Expired')),
     FOREIGN KEY (cust_id) REFERENCES Customer(cust_id),
     FOREIGN KEY (location_id) REFERENCES Location(location_id)
