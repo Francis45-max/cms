@@ -2,8 +2,8 @@
 
 CREATE OR REPLACE PROCEDURE Extend_Free_Time_Based_On_Appointment 
 IS
-    TYPE t_cont IS TABLE OF ServiceContract%ROWTYPE; 
-    TYPE t_audit_log IS TABLE OF ContainerAuditLog%ROWTYPE; 
+    TYPE t_cont IS TABLE OF ServiceContract%ROWTYPE INDEX BY PLS_INTEGER; 
+    TYPE t_audit_log IS TABLE OF ContainerAuditLog%ROWTYPE INDEX BY PLS_INTEGER; 
 
     CURSOR cur_cont IS 
         SELECT cont.service_contract_id, cont.free_time, cont.new_lfd, t.appointment_status
@@ -17,49 +17,54 @@ IS
     v_days_to_extend NUMBER;
     
 BEGIN
-    -- Open cursor and fetch records in bulk
     OPEN cur_cont;
     LOOP
-        FETCH cur_cont BULK COLLECT INTO v_cont LIMIT 100; -- Process in batches
+        FETCH cur_cont BULK COLLECT INTO v_cont LIMIT 100; 
         
         EXIT WHEN v_cont.COUNT = 0;
         
+        v_audit_logs.DELETE; -- Reset for each batch
+        
         FOR i IN 1 .. v_cont.COUNT LOOP
-            -- Extract number of unavailable days
-            v_days_to_extend := TO_NUMBER(REGEXP_SUBSTR(v_cont(i).appointment_status, '\d+'));
+            -- Extract number of unavailable days safely
+            BEGIN
+                v_days_to_extend := TO_NUMBER(REGEXP_SUBSTR(v_cont(i).appointment_status, '\d+'));
+            EXCEPTION
+                WHEN OTHERS THEN 
+                    v_days_to_extend := NULL; -- Handle cases where extraction fails
+            END;
 
-            -- Update New LFD based on the condition
-            UPDATE ServiceContract 
-            SET new_lfd = 
-                CASE 
-                    WHEN v_days_to_extend IS NOT NULL THEN free_time + v_days_to_extend
-                    ELSE free_time -- If container is not affected, keep it same
-                END
-            WHERE service_contract_id = v_cont(i).service_contract_id;
-
-            -- Store audit log entry
-            v_audit_logs.EXTEND;
-            v_audit_logs(v_audit_logs.LAST).audit_timestamp := SYSTIMESTAMP;
-            v_audit_logs(v_audit_logs.LAST).audit_action := 'UPDATE';
-            v_audit_logs(v_audit_logs.LAST).affected_table := 'ServiceContract';
-            v_audit_logs(v_audit_logs.LAST).affected_record_id := v_cont(i).service_contract_id;
-            v_audit_logs(v_audit_logs.LAST).old_value := TO_CLOB(v_cont(i).new_lfd);
-            v_audit_logs(v_audit_logs.LAST).new_value := TO_CLOB(
+            -- Update the ServiceContract records
+            v_cont(i).new_lfd := 
                 CASE 
                     WHEN v_days_to_extend IS NOT NULL THEN v_cont(i).free_time + v_days_to_extend
                     ELSE v_cont(i).free_time
-                END
-            );
-            v_audit_logs(v_audit_logs.LAST).user_name := USER;
-            v_audit_logs(v_audit_logs.LAST).session_id := SYS_CONTEXT('USERENV', 'SESSIONID');
+                END;
+
+            -- Prepare audit log entry
+            v_audit_logs(i).audit_timestamp := SYSTIMESTAMP;
+            v_audit_logs(i).audit_action := 'UPDATE';
+            v_audit_logs(i).affected_table := 'ServiceContract';
+            v_audit_logs(i).affected_record_id := v_cont(i).service_contract_id;
+            v_audit_logs(i).old_value := TO_CHAR(v_cont(i).new_lfd);
+            v_audit_logs(i).new_value := TO_CHAR(v_cont(i).free_time + NVL(v_days_to_extend, 0));
+            v_audit_logs(i).user_name := USER;
+            v_audit_logs(i).session_id := SYS_CONTEXT('USERENV', 'SESSIONID');
         END LOOP;
 
-        -- Insert all audit logs in bulk
-        FORALL i IN 1 .. v_audit_logs.COUNT
-            INSERT INTO ContainerAuditLog VALUES v_audit_logs(i);
+        -- Bulk Update for better performance
+        FORALL i IN 1 .. v_cont.COUNT
+            UPDATE ServiceContract 
+            SET new_lfd = v_cont(i).new_lfd
+            WHERE service_contract_id = v_cont(i).service_contract_id;
 
-        COMMIT; -- Commit after batch processing
+        -- Bulk Insert Audit Logs
+        IF v_audit_logs.COUNT > 0 THEN
+            FORALL i IN 1 .. v_audit_logs.COUNT
+                INSERT INTO ContainerAuditLog VALUES v_audit_logs(i);
+        END IF;
 
+        COMMIT;
     END LOOP;
     CLOSE cur_cont;
 
@@ -71,6 +76,7 @@ EXCEPTION
         COMMIT;
 END Extend_Free_Time_Based_On_Appointment;
 /
+
 
 
 -- Test Case for Extend_Free_Time_Based_On_Appointment Procedure
