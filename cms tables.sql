@@ -24,7 +24,7 @@ CREATE TABLE Terminal (
     location_id NUMBER NOT NULL,
     port_closure_dates DATE,
     terminal_name VARCHAR2(255) NOT NULL,
-    appoNUMBERment_status VARCHAR2(100),
+    appointment_status VARCHAR2(100),
     gate_out_date DATE,
     gate_in_date DATE,
     FOREIGN KEY (location_id) REFERENCES Location(location_id)
