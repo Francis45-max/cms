@@ -2,67 +2,58 @@
 
 CREATE OR REPLACE PROCEDURE Extend_Free_Time_Based_On_Appointment 
 IS
-    TYPE t_cont IS TABLE OF ServiceContract%ROWTYPE INDEX BY PLS_INTEGER; 
-    TYPE t_audit_log IS TABLE OF ContainerAuditLog%ROWTYPE INDEX BY PLS_INTEGER; 
-
+    -- Cursor to fetch relevant records
     CURSOR cur_cont IS 
-        SELECT cont.service_contract_id, cont.free_time, cont.new_lfd, t.appointment_status
-        FROM ServiceContract cont
-        JOIN Container c ON cont.service_contract_id = c.service_contract_id
+        SELECT sc.service_contract_id, sc.free_time, sc.new_lfd, t.appointment_status
+        FROM ServiceContract sc
+        JOIN Container c ON sc.service_contract_id = c.service_contract_id
         JOIN Terminal t ON c.location_id = t.location_id
         WHERE t.appointment_status LIKE 'unavailable for % days';
 
-    v_cont   t_cont;
-    v_audit_logs  t_audit_log;
+    -- Variables to store fetched values
+    v_service_contract_id ServiceContract.service_contract_id%TYPE;
+    v_free_time ServiceContract.free_time%TYPE;
+    v_new_lfd ServiceContract.new_lfd%TYPE;
+    v_appointment_status Terminal.appointment_status%TYPE;
     v_days_to_extend NUMBER;
-    
+
 BEGIN
     OPEN cur_cont;
     LOOP
-        FETCH cur_cont BULK COLLECT INTO v_cont LIMIT 100; 
-        
-        EXIT WHEN v_cont.COUNT = 0;
-        
-        v_audit_logs.DELETE; -- Reset for each batch
-        
-        FOR i IN 1 .. v_cont.COUNT LOOP
-            -- Extract number of unavailable days safely
-            BEGIN
-                v_days_to_extend := TO_NUMBER(REGEXP_SUBSTR(v_cont(i).appointment_status, '\d+'));
-            EXCEPTION
-                WHEN OTHERS THEN 
-                    v_days_to_extend := NULL; -- Handle cases where extraction fails
+        -- Fetch one row at a time
+        FETCH cur_cont INTO v_service_contract_id, v_free_time, v_new_lfd, v_appointment_status;
+        EXIT WHEN cur_cont%NOTFOUND;
+
+        -- Extract number of unavailable days
+        BEGIN
+            v_days_to_extend := TO_NUMBER(REGEXP_SUBSTR(v_appointment_status, '\d+'));
+        EXCEPTION
+            WHEN OTHERS THEN 
+                v_days_to_extend := NULL; -- Handle cases where extraction fails
+        END;
+
+        -- Compute new LFD (Last Free Day)
+        v_new_lfd := 
+            CASE 
+                WHEN v_days_to_extend IS NOT NULL THEN v_free_time + v_days_to_extend
+                ELSE v_free_time
             END;
 
-            -- Update the ServiceContract records
-            v_cont(i).new_lfd := 
-                CASE 
-                    WHEN v_days_to_extend IS NOT NULL THEN v_cont(i).free_time + v_days_to_extend
-                    ELSE v_cont(i).free_time
-                END;
+        -- Update the ServiceContract table
+        UPDATE ServiceContract 
+        SET new_lfd = v_new_lfd
+        WHERE service_contract_id = v_service_contract_id;
 
-            -- Prepare audit log entry
-            v_audit_logs(i).audit_timestamp := SYSTIMESTAMP;
-            v_audit_logs(i).audit_action := 'UPDATE';
-            v_audit_logs(i).affected_table := 'ServiceContract';
-            v_audit_logs(i).affected_record_id := v_cont(i).service_contract_id;
-            v_audit_logs(i).old_value := TO_CHAR(v_cont(i).new_lfd);
-            v_audit_logs(i).new_value := TO_CHAR(v_cont(i).free_time + NVL(v_days_to_extend, 0));
-            v_audit_logs(i).user_name := USER;
-            v_audit_logs(i).session_id := SYS_CONTEXT('USERENV', 'SESSIONID');
-        END LOOP;
-
-        -- Bulk Update for better performance
-        FORALL i IN 1 .. v_cont.COUNT
-            UPDATE ServiceContract 
-            SET new_lfd = v_cont(i).new_lfd
-            WHERE service_contract_id = v_cont(i).service_contract_id;
-
-        -- Bulk Insert Audit Logs
-        IF v_audit_logs.COUNT > 0 THEN
-            FORALL i IN 1 .. v_audit_logs.COUNT
-                INSERT INTO ContainerAuditLog VALUES v_audit_logs(i);
-        END IF;
+        -- Insert into audit log with correct data types
+        INSERT INTO ContainerAuditLog (
+            audit_timestamp, audit_action, affected_table, affected_record_id, 
+            old_value, new_value, user_name, session_id
+        ) 
+        VALUES (
+            SYSTIMESTAMP, 'UPDATE', 'ServiceContract', v_service_contract_id, 
+            TO_CHAR(v_free_time), TO_CHAR(v_new_lfd), 
+            USER, SYS_CONTEXT('USERENV', 'SESSIONID')
+        );
 
         COMMIT;
     END LOOP;
@@ -71,8 +62,11 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
-        INSERT INTO ErrorLog (error_timestamp, error_message, affected_table, resolved_status, user_name, session_id)
-        VALUES (SYSTIMESTAMP, SQLERRM, 'ServiceContract', 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID'));
+        INSERT INTO ErrorLog (
+            error_timestamp, error_message, affected_table, affected_record_id, resolved_status, user_name, session_id
+        ) VALUES (
+            SYSTIMESTAMP, DBMS_UTILITY.FORMAT_ERROR_STACK, 'ServiceContract', 'N/A', 'No', USER, SYS_CONTEXT('USERENV', 'SESSIONID')
+        );
         COMMIT;
 END Extend_Free_Time_Based_On_Appointment;
 /
