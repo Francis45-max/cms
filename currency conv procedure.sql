@@ -3,56 +3,51 @@
 --Procedure to convert detention charges to customer's region currency
 
 CREATE OR REPLACE PROCEDURE Convert_To_Customer_Currency_Proc(
-        p_container_number IN VARCHAR2,
-        p_customer_id IN VARCHAR2,
-        p_converted_charges OUT NUMBER
-    ) IS
-        v_detention_days NUMBER;
-        v_activity_currency VARCHAR2(50);
-        v_billed_currency VARCHAR2(50);
-        v_conversion_rate DECIMAL(10, 2);
-        v_region_id NUMBER;
-        v_gate_out_date DATE; -- Declare v_gate_out_date
-        v_gate_in_date DATE;  -- Declare v_gate_in_date
+    p_container_number IN VARCHAR2,
+    p_customer_id IN VARCHAR2,
+    p_converted_charges OUT NUMBER
+) IS
+    v_detention_days NUMBER;
+    v_activity_currency VARCHAR2(50);
+    v_billed_currency VARCHAR2(50);
+    v_conversion_rate NUMBER(10,2);
+    v_region_id NUMBER;
+    v_gate_out_date DATE;
+    v_gate_in_date DATE;
+BEGIN
+    -- Fetch container, customer, and currency details in a single query for efficiency
     BEGIN
-        -- Fetch gate_out_date and gate_in_date for the container
-        BEGIN
-            SELECT c.gate_out_date, c.gate_in_date
-            NUMBERO v_gate_out_date, v_gate_in_date
-            FROM Container c
-            WHERE c.container_number = p_container_number;
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                RAISE_APPLICATION_ERROR(-20002, 'Container not found.');
-        END;
+        SELECT c.gate_out_date, c.gate_in_date, cu.region_id, curr.activity_currency, 
+               curr.billed_currency, curr.conversion_rate
+        INTO v_gate_out_date, v_gate_in_date, v_region_id, v_activity_currency, 
+             v_billed_currency, v_conversion_rate
+        FROM Container c
+        JOIN Customer cu ON c.customer_id = cu.cust_id
+        JOIN Currency curr ON cu.region_id = curr.region_id
+        WHERE c.container_number = p_container_number
+          AND cu.cust_id = p_customer_id;
 
-        -- Calculate detention days
-        v_detention_days := Calculate_Detention_Charges(p_container_number, v_gate_out_date, v_gate_in_date);
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RAISE_APPLICATION_ERROR(-20001, 'Container, customer, or currency details not found.');
+    END;
 
-        -- Fetch region_id for the customer
-        BEGIN
-            SELECT region_id NUMBERO v_region_id
-            FROM Customer
-            WHERE cust_id = p_customer_id;
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                RAISE_APPLICATION_ERROR(-20003, 'Customer not found.');
-        END;
+    -- Calculate detention days using the external function/procedure
+    v_detention_days := Calculate_Detention_Charges(p_container_number, v_gate_out_date, v_gate_in_date);
+    
+    -- Ensure detention days is not NULL
+    IF v_detention_days IS NULL THEN
+        v_detention_days := 0;
+    END IF;
 
-        -- Fetch currency details for the customer's region
-        BEGIN
-            SELECT activity_currency, billed_currency, conversion_rate
-            NUMBERO v_activity_currency, v_billed_currency, v_conversion_rate
-            FROM Currency
-            WHERE region_id = v_region_id;
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                RAISE_APPLICATION_ERROR(-20004, 'Currency details not found for the customer.');
-        END;
+    -- Calculate detention charges in the billed currency
+    p_converted_charges := v_detention_days * v_conversion_rate;
 
-        -- Calculate detention charges in the billed currency
-        p_converted_charges := v_detention_days * v_conversion_rate;
-    END Convert_To_Customer_Currency_Proc;
+    DBMS_OUTPUT.PUT_LINE('Container: ' || p_container_number || ', Customer ID: ' || p_customer_id ||
+                         ', Detention Days: ' || v_detention_days || ', Converted Charges: ' || p_converted_charges);
+END Convert_To_Customer_Currency_Proc;
+/
+
 
 
 ----Test case
